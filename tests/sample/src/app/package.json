@@ -1,0 +1,20 @@
+{
+  "name": "@sample/app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "vue-tsc --noEmit -p tsconfig.json",
+    "test:run": "vitest run",
+    "build": "vue-tsc -b && vite build"
+  },
+  "dependencies": {
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.11",
+    "vue-tsc": "^3.3.11"
+  }
+}
