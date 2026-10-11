@@ -1,0 +1,151 @@
+# Reusable: build a versioned container image (single or multi-arch) and push it to a registry.
+# The version comes from the release tag (vX.Y.Z[-pre.N]) or the `version` input. A prerelease also gets :dev, a
+# release also gets :latest; deploy only :<version> (moving tags cannot be rolled back).
+# The Dockerfile receives --build-arg VERSION=<version>.
+#
+#   on:
+#     release:
+#       types: [released, prereleased]
+#   permissions:
+#     contents: read
+#     packages: write          # GHCR push with GITHUB_TOKEN
+#   jobs:
+#     image:
+#       uses: Tiny-Anvil/workflows/.github/workflows/container-image.yml@v1
+#       with:
+#         platforms: linux/amd64,linux/arm64
+#
+# Another registry: set `registry` and `image`, pass secrets.registry-username and secrets.registry-password.
+name: container-image
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        type: string
+        default: ghcr.io
+      image:
+        description: Full image name without tag. Default ghcr.io/<owner>/<repo> (lowercase).
+        type: string
+        default: ""
+      version:
+        description: Version tag (vX.Y.Z[-pre.N]). Default the release tag of the triggering release.
+        type: string
+        default: ""
+      platforms:
+        type: string
+        default: linux/amd64
+      context:
+        type: string
+        default: .
+      dockerfile:
+        description: Path to the Dockerfile. Default <context>/Dockerfile.
+        type: string
+        default: ""
+      push:
+        description: false builds only (e.g. to test the Dockerfile on a PR).
+        type: boolean
+        default: true
+      moving-tags:
+        description: Add :dev for a prerelease and :latest for a release.
+        type: boolean
+        default: true
+    secrets:
+      registry-username:
+        required: false
+      registry-password:
+        required: false
+    outputs:
+      version:
+        value: ${{ jobs.image.outputs.version }}
+      image:
+        value: ${{ jobs.image.outputs.image }}
+      digest:
+        description: The pushed manifest digest (sha256:...); deploy by digest for full immutability.
+        value: ${{ jobs.image.outputs.digest }}
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.config.outputs.version }}
+      image: ${{ steps.config.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Event fields go through env, never straight into the script.
+      - name: Version and tags
+        id: config
+        env:
+          INPUT_IMAGE: ${{ inputs.image }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REGISTRY: ${{ inputs.registry }}
+          REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          MOVING: ${{ inputs.moving-tags }}
+          CONTEXT: ${{ inputs.context }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          IMAGE="${INPUT_IMAGE:-$REGISTRY/${REPO,,}}"
+          VERSION="${INPUT_VERSION:-$RELEASE_TAG}"
+          [ -n "$VERSION" ] || { echo "::error::No version: not a release event and no version input"; exit 1; }
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::'$VERSION' is not vX.Y.Z[-pre.N]"; exit 1; }
+          TAGS="$IMAGE:$VERSION"
+          if [ "$MOVING" = "true" ] && [ -n "$RELEASE_TAG" ]; then
+            if [ "$PRERELEASE" = "true" ]; then TAGS="$TAGS,$IMAGE:dev"; else TAGS="$TAGS,$IMAGE:latest"; fi
+          fi
+          {
+            echo "image=$IMAGE"
+            echo "version=$VERSION"
+            echo "tags=$TAGS"
+            echo "dockerfile=${DOCKERFILE:-$CONTEXT/Dockerfile}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $TAGS"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        if: inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.registry-username || github.actor }}
+          password: ${{ secrets.registry-password || secrets.GITHUB_TOKEN }}
+
+      - name: Build${{ inputs.push && ' and push' || '' }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ steps.config.outputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.config.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.config.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.config.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PUSHED: ${{ inputs.push }}
+        run: |
+          {
+            echo "### Container image"
+            echo "- Tags: \`$TAGS\`"
+            echo "- Digest: \`${DIGEST:-n/a}\`"
+            echo "- Pushed: $PUSHED"
+          } >> "$GITHUB_STEP_SUMMARY"

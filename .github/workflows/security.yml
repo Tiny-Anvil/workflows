@@ -1,0 +1,126 @@
+# Reusable: vulnerable dependencies (NuGet incl. transitive, every project; npm high+critical), CodeQL, Trivy.
+# Call it on pull requests, on main and on a weekly schedule: new advisories appear for code that did not change.
+#
+#   permissions:
+#     contents: read
+#     security-events: write   # CodeQL results
+#     actions: read            # CodeQL on private repos
+#   jobs:
+#     security:
+#       uses: Tiny-Anvil/workflows/.github/workflows/security.yml@v1
+name: security
+
+on:
+  workflow_call:
+    inputs:
+      dotnet:
+        description: Scan NuGet packages of every *.csproj.
+        type: boolean
+        default: true
+      global-json:
+        type: string
+        default: global.json
+      npm:
+        description: Run pnpm audit in the workspace.
+        type: boolean
+        default: true
+      workspace-dir:
+        type: string
+        default: .
+      npm-audit-level:
+        type: string
+        default: high
+      codeql-languages:
+        description: JSON array of CodeQL languages; [] skips CodeQL.
+        type: string
+        default: '["csharp", "javascript-typescript"]'
+      trivy:
+        description: Trivy filesystem scan (vulnerabilities, secrets, misconfiguration).
+        type: boolean
+        default: true
+      trivy-severity:
+        type: string
+        default: HIGH,CRITICAL
+
+permissions:
+  contents: read
+
+jobs:
+  nuget:
+    name: NuGet vulnerabilities
+    if: inputs.dotnet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: ${{ inputs.global-json }}
+      # `dotnet list package --vulnerable` exits 0 even when it finds something: parse the output. Test projects
+      # count too: their transitive packages are otherwise only a build warning.
+      - name: Every project, transitive included
+        run: |
+          found=0
+          while IFS= read -r proj; do
+            dotnet restore "$proj" >/dev/null
+            out="$(dotnet list "$proj" package --vulnerable --include-transitive 2>&1)"
+            echo "$out"
+            if printf '%s\n' "$out" | grep -qE '^\s+>\s'; then
+              echo "::error file=$proj::vulnerable package(s)"; found=1
+            fi
+          done < <(git ls-files '*.csproj')
+          exit $found
+
+  npm:
+    name: npm audit
+    if: inputs.npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ${{ inputs.workspace-dir }}/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: pnpm audit
+        working-directory: ${{ inputs.workspace-dir }}
+        env:
+          LEVEL: ${{ inputs.npm-audit-level }}
+        run: pnpm audit --audit-level="$LEVEL"
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    if: inputs.codeql-languages != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.codeql-languages) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  trivy:
+    name: Trivy
+    if: inputs.trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: ${{ inputs.trivy-severity }}
+          ignore-unfixed: true
+          exit-code: "1"
