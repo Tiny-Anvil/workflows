@@ -1,0 +1,27 @@
+# This repo's own release flow: publishing release vX.Y.Z moves the major tag vX to it, so callers pinned to @vX
+# get the fix. Prereleases never move a major tag.
+name: update-major-tag
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: write
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Move the major tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          [[ "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TAG' is not vX.Y.Z"; exit 1; }
+          major="v${BASH_REMATCH[1]}"
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/$major"
+          echo "$major -> $TAG ($(git rev-parse --short "$TAG"))"

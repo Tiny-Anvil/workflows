@@ -1,0 +1,80 @@
+# This repo's own tests: lint every workflow, then run each reusable workflow against the sample app in
+# tests/sample, exactly as a caller would (only the image is built without pushing).
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+
+  dotnet:
+    uses: ./.github/workflows/dotnet-build.yml
+    with:
+      project: tests/sample/src/api/Sample.Api.csproj
+      test-project: tests/sample/src/api.tests/Sample.Api.Tests.csproj
+      global-json: tests/sample/global.json
+      forbidden-type: DevBypassAuthenticationHandler
+
+  frontend:
+    uses: ./.github/workflows/frontend-build.yml
+    with:
+      workspace-dir: tests/sample
+      app-dir: tests/sample/src/app
+      guard-env: VITE_AUTH_BYPASS
+      guard-message: Refusing VITE_AUTH_BYPASS=true in a production build
+
+  security:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/security.yml
+    with:
+      global-json: tests/sample/global.json
+      workspace-dir: tests/sample
+
+  licences:
+    uses: ./.github/workflows/license-check.yml
+    with:
+      allowed-licenses: tests/sample/allowed-licenses.json
+      dotnet-project: tests/sample/src/api/Sample.Api.csproj
+      global-json: tests/sample/global.json
+      workspace-dir: tests/sample
+      enforce: false
+
+  image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/container-image.yml
+    with:
+      context: tests/sample
+      version: v0.0.0-ci
+      platforms: linux/amd64,linux/arm64
+      push: false
+
+  image-version:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - name: The image workflow reports its version
+        env:
+          VERSION: ${{ needs.image.outputs.version }}
+          IMAGE: ${{ needs.image.outputs.image }}
+        run: |
+          [ "$VERSION" = "v0.0.0-ci" ] || { echo "::error::version output '$VERSION'"; exit 1; }
+          [ -n "$IMAGE" ] || { echo "::error::no image output"; exit 1; }
+          echo "ok: $IMAGE:$VERSION"
