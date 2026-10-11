@@ -12,3 +12,7 @@ updates:
   - package-ecosystem: npm
     directory: "/tests/sample"
     schedule: { interval: monthly }
+    ignore:
+      # TypeScript 7 (the native port) breaks vue-tsc for now; revisit when vue-tsc supports it.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
