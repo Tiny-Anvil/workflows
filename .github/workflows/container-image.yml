@@ -113,7 +113,7 @@ jobs:
           echo "Building $TAGS"
 
       - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to the registry
         if: inputs.push
