@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly }
+    groups:
+      actions:
+        update-types: [minor, patch]
+  - package-ecosystem: nuget
+    directory: "/tests/sample"
+    schedule: { interval: monthly }
+  - package-ecosystem: npm
+    directory: "/tests/sample"
+    schedule: { interval: monthly }

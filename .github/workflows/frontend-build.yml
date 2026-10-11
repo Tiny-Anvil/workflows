@@ -1,0 +1,108 @@
+# Reusable: pnpm install (workspace root) → lint → test → build → (optional) assert a production build refuses a
+# dev-only flag.
+#
+#   jobs:
+#     spa:
+#       uses: Tiny-Anvil/workflows/.github/workflows/frontend-build.yml@v1
+#       with:
+#         app-dir: src/apps/app
+#         guard-env: VITE_AUTH_BYPASS
+#         guard-message: VITE_AUTH_BYPASS=true in a production build
+#
+# Caller permissions: contents: read. pnpm comes from the root package.json "packageManager" field.
+name: frontend-build
+
+on:
+  workflow_call:
+    inputs:
+      workspace-dir:
+        description: The pnpm workspace root (where pnpm-lock.yaml lives).
+        type: string
+        default: .
+      app-dir:
+        description: The app to lint, test and build, relative to the repository root.
+        type: string
+        required: true
+      node-version:
+        type: string
+        default: "22"
+      lint-script:
+        description: package.json script for linting. Empty skips.
+        type: string
+        default: lint
+      test-script:
+        description: package.json script for unit tests (non-watch). Empty skips.
+        type: string
+        default: test:run
+      build-script:
+        description: package.json script for the production build.
+        type: string
+        default: build
+      guard-env:
+        description: Env var that a production build must refuse when "true" (e.g. VITE_AUTH_BYPASS). Empty skips.
+        type: string
+        default: ""
+      guard-message:
+        description: Text the refusing build must print, so a build failing for another reason does not pass.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint, test and build (frontend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ${{ inputs.workspace-dir }}/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+          cache-dependency-path: ${{ inputs.workspace-dir }}/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: ${{ inputs.workspace-dir }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: inputs.lint-script != ''
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          SCRIPT: ${{ inputs.lint-script }}
+        run: pnpm run "$SCRIPT"
+
+      - name: Test
+        if: inputs.test-script != ''
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          SCRIPT: ${{ inputs.test-script }}
+        run: pnpm run "$SCRIPT"
+
+      - name: Build
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          SCRIPT: ${{ inputs.build-script }}
+        run: pnpm run "$SCRIPT"
+
+      - name: Assert a production build refuses the guarded flag
+        if: inputs.guard-env != ''
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          GUARD_ENV: ${{ inputs.guard-env }}
+          GUARD_MESSAGE: ${{ inputs.guard-message }}
+        run: |
+          [ -n "$GUARD_MESSAGE" ] || { echo "::error::guard-env needs guard-message"; exit 1; }
+          if env "$GUARD_ENV=true" pnpm exec vite build > guard-check.log 2>&1; then
+            echo "::error::A production build accepted $GUARD_ENV=true. The guard is gone."; exit 1
+          fi
+          grep -qF -- "$GUARD_MESSAGE" guard-check.log || {
+            echo "::error::The build failed, but not on the guard. Log:"; cat guard-check.log; exit 1; }
+          echo "OK: a production build refuses $GUARD_ENV=true"

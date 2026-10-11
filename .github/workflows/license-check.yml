@@ -1,0 +1,96 @@
+# Reusable: licences of NuGet and npm (production) dependencies against an allow-list (a JSON array of SPDX ids).
+# Start with enforce: false (report only), review the report, adjust the list, then enforce.
+#
+#   jobs:
+#     licences:
+#       uses: Tiny-Anvil/workflows/.github/workflows/license-check.yml@v1
+#       with:
+#         dotnet-project: src/apps/api/MyApp.Api.csproj
+#         allowed-licenses: .github/allowed-licenses.json
+#         enforce: false
+name: license-check
+
+on:
+  workflow_call:
+    inputs:
+      allowed-licenses:
+        description: Path to a JSON array of allowed SPDX licence ids.
+        type: string
+        default: .github/allowed-licenses.json
+      dotnet-project:
+        description: Project (or solution) whose NuGet licences to check. Empty skips NuGet.
+        type: string
+        default: ""
+      global-json:
+        type: string
+        default: global.json
+      workspace-dir:
+        description: pnpm workspace root. Empty skips npm.
+        type: string
+        default: .
+      enforce:
+        description: Fail on a licence outside the list (false = report only).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  licences:
+    name: Licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        if: inputs.dotnet-project != ''
+        with:
+          global-json-file: ${{ inputs.global-json }}
+
+      - name: NuGet licences
+        if: inputs.dotnet-project != ''
+        env:
+          PROJECT: ${{ inputs.dotnet-project }}
+          ALLOWED: ${{ inputs.allowed-licenses }}
+          ENFORCE: ${{ inputs.enforce }}
+        run: |
+          dotnet tool install --global nuget-license >/dev/null
+          dotnet restore "$PROJECT" >/dev/null
+          set +e
+          nuget-license -i "$PROJECT" -a "$ALLOWED" -o Table
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "::warning::NuGet licences outside $ALLOWED (or a tool error), exit $rc"
+            [ "$ENFORCE" != "true" ] || exit $rc
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: inputs.workspace-dir != ''
+        with:
+          package_json_file: ${{ inputs.workspace-dir }}/package.json
+      - uses: actions/setup-node@v5
+        if: inputs.workspace-dir != ''
+        with:
+          node-version: "22"
+
+      - name: npm licences (production dependencies)
+        if: inputs.workspace-dir != ''
+        working-directory: ${{ inputs.workspace-dir }}
+        env:
+          ALLOWED: ${{ github.workspace }}/${{ inputs.allowed-licenses }}
+          ENFORCE: ${{ inputs.enforce }}
+        run: |
+          pnpm install --frozen-lockfile >/dev/null
+          pnpm licenses list --prod --json > "$RUNNER_TEMP/npm-licenses.json"
+          # shellcheck disable=SC2016 # the node script is single-quoted on purpose
+          node -e '
+            const fs = require("fs");
+            const allowed = new Set(JSON.parse(fs.readFileSync(process.env.ALLOWED, "utf8")));
+            const byLicence = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/npm-licenses.json", "utf8"));
+            const bad = Object.entries(byLicence).filter(([licence]) => !allowed.has(licence));
+            for (const [licence, pkgs] of bad) console.log(`::warning::${licence}: ${pkgs.map((p) => p.name).join(", ")}`);
+            console.log(`${Object.keys(byLicence).length} licence(s) found, ${bad.length} outside the list`);
+            if (bad.length && process.env.ENFORCE === "true") process.exit(1);
+          '

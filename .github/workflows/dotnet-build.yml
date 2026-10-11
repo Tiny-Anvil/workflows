@@ -1,0 +1,119 @@
+# Reusable: restore → Release build → (optional) assert a dev-only type is absent from the Release assembly →
+# dotnet test (Debug) → test results as an artifact.
+#
+#   jobs:
+#     api:
+#       uses: Tiny-Anvil/workflows/.github/workflows/dotnet-build.yml@v1
+#       with:
+#         project: src/apps/api/MyApp.Api.csproj
+#         test-project: src/tests/MyApp.Api.Tests/MyApp.Api.Tests.csproj
+#         forbidden-type: DevBypassAuthenticationHandler
+#
+# Caller permissions: contents: read. Private NuGet feed: pass nuget-source + secrets.nuget-token.
+name: dotnet-build
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: The API (or main) project to build in Release.
+        type: string
+        required: true
+      test-project:
+        description: Test project to run (Debug). Empty skips tests.
+        type: string
+        default: ""
+      global-json:
+        description: Path to global.json (pins the SDK).
+        type: string
+        default: global.json
+      forbidden-type:
+        description: A type name that must NOT be in the Release assembly (e.g. a dev auth bypass). Empty skips.
+        type: string
+        default: ""
+      assembly-name:
+        description: Assembly file name without .dll. Defaults to the project file name.
+        type: string
+        default: ""
+      nuget-source:
+        description: Key of a private source in nuget.config to credit with secrets.nuget-token.
+        type: string
+        default: ""
+      nuget-username:
+        description: Username for the private source (GitHub Packages accepts any non-empty value).
+        type: string
+        default: token
+    secrets:
+      nuget-token:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test (.NET)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: ${{ inputs.global-json }}
+
+      - name: Credit the private NuGet source
+        if: inputs.nuget-source != ''
+        env:
+          SOURCE: ${{ inputs.nuget-source }}
+          USERNAME: ${{ inputs.nuget-username }}
+          TOKEN: ${{ secrets.nuget-token }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "::error::nuget-source is set but secrets.nuget-token is empty"; exit 1; }
+          dotnet nuget update source "$SOURCE" --username "$USERNAME" --password "$TOKEN" --store-password-in-clear-text
+
+      - name: Restore
+        env:
+          PROJECT: ${{ inputs.project }}
+          TEST_PROJECT: ${{ inputs.test-project }}
+        run: |
+          dotnet restore "$PROJECT"
+          [ -z "$TEST_PROJECT" ] || dotnet restore "$TEST_PROJECT"
+
+      - name: Build (Release)
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: dotnet build "$PROJECT" -c Release --no-restore
+
+      # Type names live verbatim in the assembly's metadata, so a byte search over the built artifact proves the
+      # type is not there, whatever the build configuration claims.
+      - name: Assert the forbidden type is absent from the Release assembly
+        if: inputs.forbidden-type != ''
+        env:
+          PROJECT: ${{ inputs.project }}
+          ASSEMBLY: ${{ inputs.assembly-name }}
+          FORBIDDEN: ${{ inputs.forbidden-type }}
+        run: |
+          name="${ASSEMBLY:-$(basename "$PROJECT" .csproj)}"
+          asm="$(find "$(dirname "$PROJECT")/bin/Release" -name "$name.dll" -not -path '*/ref/*' | head -1)"
+          [ -n "$asm" ] || { echo "::error::$name.dll not found under $(dirname "$PROJECT")/bin/Release"; exit 1; }
+          if grep -aq "$FORBIDDEN" "$asm"; then
+            echo "::error::$FORBIDDEN is present in the Release assembly $asm. Refusing to pass."
+            exit 1
+          fi
+          echo "OK: $FORBIDDEN is not in $asm"
+
+      # Debug: test factories often rely on development-only code that Release must not contain.
+      - name: Test
+        if: inputs.test-project != ''
+        env:
+          TEST_PROJECT: ${{ inputs.test-project }}
+        run: dotnet test "$TEST_PROJECT" --logger "console;verbosity=normal" --logger "trx;LogFileName=tests.trx"
+
+      - name: Upload test results
+        if: always() && inputs.test-project != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore
