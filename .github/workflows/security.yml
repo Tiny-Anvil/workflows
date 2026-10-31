@@ -3,11 +3,15 @@
 #
 #   permissions:
 #     contents: read
-#     security-events: write   # CodeQL results
+#     security-events: write   # CodeQL results (also with codeql-upload: false, see below)
 #     actions: read            # CodeQL on private repos
 #   jobs:
 #     security:
 #       uses: Tiny-Anvil/workflows/.github/workflows/security.yml@v1
+#
+# codeql-upload: false (private repo without paid code scanning): CodeQL analyses but uploads nothing, keeps the SARIF
+# as an artifact and fails the job when it holds results. The CodeQL job keeps `security-events: write` either way
+# (job permissions cannot depend on an input), so callers grant it in both modes.
 name: security
 
 on:
@@ -34,6 +38,10 @@ on:
         description: JSON array of CodeQL languages; [] skips CodeQL.
         type: string
         default: '["csharp", "javascript-typescript"]'
+      codeql-upload:
+        description: Upload CodeQL results to GitHub code scanning. false keeps them as an artifact and fails on findings.
+        type: boolean
+        default: true
       trivy:
         description: Trivy filesystem scan (vulnerabilities, secrets, misconfiguration).
         type: boolean
@@ -109,6 +117,26 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
+          upload: ${{ inputs.codeql-upload && 'always' || 'never' }}
+          output: codeql-results
+      - name: Keep the report
+        if: always() && !inputs.codeql-upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeql-${{ matrix.language }}
+          path: codeql-results
+          if-no-files-found: ignore
+      - name: Fail on findings
+        if: ${{ !inputs.codeql-upload }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(codeql-results/*.sarif)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::CodeQL wrote no report"; exit 1; }
+          jq -r '.runs[].results[] | "::error file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine)::\(.ruleId): \(.message.text)"' "${files[@]}"
+          count=$(jq -s '[.[].runs[].results[]] | length' "${files[@]}")
+          echo "CodeQL findings: $count"
+          [ "$count" -eq 0 ]
 
   trivy:
     name: Trivy
