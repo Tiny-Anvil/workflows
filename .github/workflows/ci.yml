@@ -46,6 +46,21 @@ jobs:
       global-json: tests/sample/global.json
       workspace-dir: tests/sample
 
+  security-no-upload:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/security.yml
+    with:
+      global-json: tests/sample/global.json
+      workspace-dir: tests/sample
+      dotnet: false
+      npm: false
+      trivy: false
+      codeql-languages: '["csharp"]'
+      codeql-upload: false
+
   licences:
     uses: ./.github/workflows/license-check.yml
     with:

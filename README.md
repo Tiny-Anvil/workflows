@@ -130,6 +130,7 @@ A GitHub release `v1.2.0` builds `ghcr.io/<owner>/<repo>:v1.2.0` (+ `:latest`; a
 | `global-json`, `workspace-dir` | `global.json`, `.` | |
 | `npm-audit-level` | `high` | |
 | `codeql-languages` | `["csharp", "javascript-typescript"]` | JSON array; `[]` skips CodeQL |
+| `codeql-upload` | `true` | `false` runs CodeQL with `upload: never`, keeps the SARIF as an artifact (`codeql-<language>`) and fails on findings; for private repos without paid code scanning. The caller grants `security-events: write` either way |
 | `trivy-severity` | `HIGH,CRITICAL` | |
 
 ### license-check
