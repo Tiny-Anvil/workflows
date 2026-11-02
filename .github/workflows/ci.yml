@@ -35,6 +35,8 @@ jobs:
       app-dir: tests/sample/src/app
       guard-env: VITE_AUTH_BYPASS
       guard-message: Refusing VITE_AUTH_BYPASS=true in a production build
+    secrets:
+      npm-token: ${{ secrets.GITHUB_TOKEN }}
 
   security:
     permissions:
@@ -45,6 +47,8 @@ jobs:
     with:
       global-json: tests/sample/global.json
       workspace-dir: tests/sample
+    secrets:
+      npm-token: ${{ secrets.GITHUB_TOKEN }}
 
   security-no-upload:
     permissions:
@@ -69,6 +73,8 @@ jobs:
       global-json: tests/sample/global.json
       workspace-dir: tests/sample
       enforce: false
+    secrets:
+      npm-token: ${{ secrets.GITHUB_TOKEN }}
 
   image:
     permissions:
