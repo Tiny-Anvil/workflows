@@ -8,6 +8,13 @@
 #         dotnet-project: src/apps/api/MyApp.Api.csproj
 #         allowed-licenses: .github/allowed-licenses.json
 #         enforce: false
+#
+# Private @tiny-anvil packages: pass a token and let the caller's .npmrc read it (an empty secret changes nothing):
+#     secrets:
+#       npm-token: ${{ secrets.PACKAGES_READ_TOKEN }}
+#   .npmrc:
+#     @tiny-anvil:registry=https://npm.pkg.github.com
+#     //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 name: license-check
 
 on:
@@ -32,6 +39,10 @@ on:
         description: Fail on a licence outside the list (false = report only).
         type: boolean
         default: false
+    secrets:
+      npm-token:
+        description: Token for private @tiny-anvil npm packages on GitHub Packages (read:packages). Optional; the caller's .npmrc reads it as NODE_AUTH_TOKEN.
+        required: false
 
 permissions:
   contents: read
@@ -79,6 +90,7 @@ jobs:
         if: inputs.workspace-dir != ''
         working-directory: ${{ inputs.workspace-dir }}
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
           ALLOWED: ${{ github.workspace }}/${{ inputs.allowed-licenses }}
           ENFORCE: ${{ inputs.enforce }}
         run: |

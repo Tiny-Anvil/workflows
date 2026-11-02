@@ -97,6 +97,28 @@ jobs:
 A GitHub release `v1.2.0` builds `ghcr.io/<owner>/<repo>:v1.2.0` (+ `:latest`; a prerelease gets `:dev`), with
 `--build-arg VERSION=v1.2.0`. Deploy the version tag, or the `digest` output, never `:latest`.
 
+### Private npm packages
+
+`frontend-build`, `security` and `license-check` take an optional secret `npm-token` for private `@tiny-anvil/*`
+packages on GitHub Packages (a token with `read:packages`). It reaches `pnpm install` and `pnpm audit` as
+`NODE_AUTH_TOKEN`; without it nothing changes.
+
+```yaml
+  spa:
+    uses: Tiny-Anvil/workflows/.github/workflows/frontend-build.yml@v1
+    with:
+      app-dir: src/apps/app
+    secrets:
+      npm-token: ${{ secrets.PACKAGES_READ_TOKEN }}
+```
+
+The app's `.npmrc` reads the token only for that scope:
+
+```ini
+@tiny-anvil:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+```
+
 ## Inputs
 
 ### dotnet-build
@@ -141,6 +163,8 @@ A GitHub release `v1.2.0` builds `ghcr.io/<owner>/<repo>:v1.2.0` (+ `:latest`; a
 | `dotnet-project` | `""` | Project or solution; empty skips NuGet |
 | `workspace-dir` | `.` | pnpm workspace; empty skips npm |
 | `enforce` | `false` | Fail on a licence outside the list |
+
+Secret (all three, optional): `npm-token`, see Private npm packages above.
 
 ### container-image
 
