@@ -9,6 +9,13 @@
 #     security:
 #       uses: Tiny-Anvil/workflows/.github/workflows/security.yml@v1
 #
+# Private @tiny-anvil packages: pass a token and let the caller's .npmrc read it (an empty secret changes nothing):
+#     secrets:
+#       npm-token: ${{ secrets.PACKAGES_READ_TOKEN }}
+#   .npmrc:
+#     @tiny-anvil:registry=https://npm.pkg.github.com
+#     //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+#
 # codeql-upload: false (private repo without paid code scanning): CodeQL analyses but uploads nothing, keeps the SARIF
 # as an artifact and fails the job when it holds results. The CodeQL job keeps `security-events: write` either way
 # (job permissions cannot depend on an input), so callers grant it in both modes.
@@ -49,6 +56,10 @@ on:
       trivy-severity:
         type: string
         default: HIGH,CRITICAL
+    secrets:
+      npm-token:
+        description: Token for private @tiny-anvil npm packages on GitHub Packages (read:packages). Optional; the caller's .npmrc reads it as NODE_AUTH_TOKEN.
+        required: false
 
 permissions:
   contents: read
@@ -93,6 +104,7 @@ jobs:
       - name: pnpm audit
         working-directory: ${{ inputs.workspace-dir }}
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
           LEVEL: ${{ inputs.npm-audit-level }}
         run: pnpm audit --audit-level="$LEVEL"
 

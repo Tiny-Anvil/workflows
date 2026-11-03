@@ -9,6 +9,13 @@
 #         guard-env: VITE_AUTH_BYPASS
 #         guard-message: VITE_AUTH_BYPASS=true in a production build
 #
+# Private @tiny-anvil packages: pass a token and let the caller's .npmrc read it (an empty secret changes nothing):
+#     secrets:
+#       npm-token: ${{ secrets.PACKAGES_READ_TOKEN }}
+#   .npmrc:
+#     @tiny-anvil:registry=https://npm.pkg.github.com
+#     //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+#
 # Caller permissions: contents: read. pnpm comes from the root package.json "packageManager" field.
 name: frontend-build
 
@@ -46,6 +53,10 @@ on:
         description: Text the refusing build must print, so a build failing for another reason does not pass.
         type: string
         default: ""
+    secrets:
+      npm-token:
+        description: Token for private @tiny-anvil npm packages on GitHub Packages (read:packages). Optional; the caller's .npmrc reads it as NODE_AUTH_TOKEN.
+        required: false
 
 permissions:
   contents: read
@@ -70,6 +81,8 @@ jobs:
 
       - name: Install
         working-directory: ${{ inputs.workspace-dir }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
         run: pnpm install --frozen-lockfile
 
       - name: Lint
