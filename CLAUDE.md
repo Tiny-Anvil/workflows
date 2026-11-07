@@ -18,7 +18,8 @@ Reusable GitHub Actions workflows for .NET + Vue apps that ship as a container i
   and a row in the README's Inputs table, in the same change.
 - **One fact, one place.** These are the shared form of the CI templates in the anvil skill
   `github-cicd-dotnet-vue` (Tiny-Anvil/agent-skills): a fix here is checked against the templates there.
-- Action versions are pinned to a major; Dependabot updates them (`.github/dependabot.yml`).
+- GitHub's own actions (`actions/*`, `github/*`) are pinned to a major; third-party actions to a full commit SHA
+  with the version as a comment (`@<sha> # v3.7.0`). Dependabot updates both (`.github/dependabot.yml`).
 - **Docs placement.** README is the user doc. Plans and specs go in `data/docs/YYYY-MM-DD-<topic>.md` (`data/` is
   gitignored), never in the repo: this overrides any skill's default (superpowers writes specs to
   `docs/superpowers/specs/`, wrong here).
